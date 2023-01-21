@@ -29,7 +29,7 @@ Type: ./fukui.x wfnfile stk\_file/cube\_file [# atom]
    - Line 3: Max # points.                                                                                                                                                     
    - Line 4: Max # prim. funcs.
 
-## GPLv3 license
+## MIT license
 See corresponding file called [`LICENSE`](LICENSE) for more details.
 
 ## Compile the code
