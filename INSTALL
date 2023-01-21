@@ -1,0 +1,20 @@
+See manual for detailed info.
+
+Dependencies: Intel(R) MKL libraries
+We recommend to use Intel(R) MKL compiler (ifort) to use MKL libraries transparently.
+
+After cloning the code of the repository:
+
+ $ mkdir build && cd build/
+ $ cmake ..
+ $ make
+
+To force CMake to compile the code with your favourite compiler, prepend the cmake line 
+   with e.g. FC=gfortran:
+
+ $ FC=gfortran cmake ..
+
+or use the explicit option:
+
+ $ cmake -DCMAKE_Fortran_COMPILER=gfortran ..
+
