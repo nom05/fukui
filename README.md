@@ -2,9 +2,9 @@
 A Program to Compute Fukui Indices and Atomic Overlap Matrices
 
 ## Authors
-  - Nicolás Otero Martínez     -     nom05 (at) uvigo.es - University of Vigo
-  - Marcos Mandado Alonso      -   mandado (at) uvigo.es - University of Vigo
-  - Ricardo A. Mosquera Castro -  mosquera (at) uvigo.es - University of Vigo
+  - Nicolás Otero Martínez     -     se.ogivu (ta) 50mon (backwards) - University of Vigo
+  - Marcos Mandado Alonso      -   se.ogivu (ta) odadnam (backwards) - University of Vigo
+  - Ricardo A. Mosquera Castro -  se.ogivu (ta) areuqsom (backwards) - University of Vigo
 
 ## How to use it
 Type: ./fukui.x wfnfile stk\_file/cube\_file [# atom]
