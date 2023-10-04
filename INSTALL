@@ -1,8 +1,5 @@
 See manual for detailed info.
 
-Dependencies: Intel(R) MKL libraries
-We recommend to use Intel(R) MKL compiler (ifort) to use MKL libraries transparently.
-
 After cloning the code of the repository:
 
  $ mkdir build && cd build/
