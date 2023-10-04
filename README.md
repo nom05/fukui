@@ -42,12 +42,15 @@ Dependencies: A Fortran compiler
 
 After cloning the code of the repository:
 
- $ mkdir build && cd build/
- $ cmake ..
- $ make
+```
+ mkdir build && cd build/
+ cmake ..
+ make
+```
 
-To force CMake to compile the code with your favourite compiler, prepend the cmake line 
-   with e.g. FC=gfortran:
+To force CMake to compile the code with your favourite compiler, prepend the cmake line with e.g. FC=gfortran:
 
- $ cmake -DCMAKE\_Fortran\_COMPILER=ifort ..
+```
+ cmake -DCMAKE_Fortran_COMPILER=ifort ..
+```
 
