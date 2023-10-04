@@ -1,6 +1,6 @@
 ! ** ./goon.f90 >> Main subroutine of the fukui program
 !
-!  Copyright (c) 2022  Nicolás Otero Martínez - Marcos Mandado Alonso - Ricardo A. Mosquera Castro
+!  Copyright (c) 2023  Nicolás Otero Martínez - Marcos Mandado Alonso - Ricardo A. Mosquera Castro
 !  This file is part of the fukui program available in:
 !      https://github.com/nom05/fukui
 !
@@ -13,28 +13,32 @@
 !  You should have received a copy of the GNU General Public License along with this code.  If not, see 
 !  <http://www.gnu.org/licenses/>.
 
-subroutine goon(iato,ntime)
+subroutine goon(ntime)
 
   use,intrinsic :: iso_fortran_env,   only: output_unit,real64,int32
-  use           :: main           ,   only: print_main,sigpi,nproc,laom,partial_time
-  use           :: wfn            ,   only: ler_wfn,nato
+  use           :: main           ,   only: print_main,sigpi,nproc,partial_time,itype,txttype,ipartdef,iato
+  use           :: wfn            ,   only: readwfn,nato
   use           :: grid           ,   only: readgrid
   use           :: pi             ,   only: readpi,set_pi_mo_only
-  use           :: computation    ,   only: orde_ic,skip_gaussians,maincalc,maindens
+  use           :: computation    ,   only: orde_ic,skip_gaussians &
+                                          , Dens                   & !! Density
+                                          , DensAom                & !! Density + AOMs
+                                          , DensDipMom             & !! Density + Dipole Moment
+                                          , DensDipMomAom            !! Density + AOMs + Dipole Moment
   use           :: output         ,   only: print_and_deallocate
 
   implicit  none
 
   integer             ,parameter         :: i4        = int32
 
-  integer  (kind = i4)                   :: iato,ipart,ntime
+  integer  (kind = i4)                   :: ntime,ipart
 !
 ! Read files
 !
 !  * WFN
 !
   call print_main("Reading wave function file:")
-  call ler_wfn
+  call readwfn
   call partial_time(ntime,'Wave function read in')
   if (iato.GT.nato) stop 'ERROR: atom label > # atoms!!!'
 
@@ -60,7 +64,7 @@ subroutine goon(iato,ntime)
 !   * Skipping gaussian functions
 !
   call print_main("Preparing calculation:")
-  call skip_gaussians(iato)
+  call skip_gaussians
 !
 !   * Only pi if specified
 !
@@ -71,21 +75,46 @@ subroutine goon(iato,ntime)
 !     allocate(poom(nom))                                               !! R1
 !     call cpu_time(ptime)
   if (nproc.EQ.0)      then
-     ipart = 10
+     ipart = ipartdef
   else if (nproc.LT.8) then
      ipart = 2*nproc
   else
      ipart =   nproc
   endif !! (nproc.EQ.0) then
+
   call partial_time(ntime,'Intermediate steps in')
+  call print_main("Calculation type: "//trim(txttype(itype)))
   call print_main("Computing grid points:")
-  if (laom) then
-     call    maincalc(ipart)
-  else
-     call    maindens(ipart)
-  endif !! (laom) then
+
+  select case(itype)
+  !! Types of calculations:
+  !!   xx
+  !!   ||-> AOM
+  !!   |--> Dip
+  !!
+  !! bin-dec
+  !!   *  00-  0: e density
+    case(0)
+      call             Dens(ipart)
+
+  !!   *  01-  1: e density + AOM
+    case(1)
+      call          DensAom(ipart)
+
+  !!   *  10-  2: e density + dip moment
+    case(2)
+      call       DensDipMom(ipart)
+
+  !!   *  11-  3: e density + dip moment + AOM
+    case(3)
+      call    DensDipMomAom(ipart)
+
+    case default
+      stop 'ERROR: The requested calculation is not implemented'
+  end select !! case(itype)
+
   call partial_time(ntime,'Grid points computed in')
 
-  call       print_and_deallocate
+  call print_and_deallocate
 
 end subroutine goon

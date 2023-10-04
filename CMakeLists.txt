@@ -1,8 +1,8 @@
 ##
 ##  CMakeFile for fukui.x
-##  Vigo, 2022-05-10
+##  Vigo, 2023-10-03
 ##
-##  Copyright (C) 2022 Nicolás Otero Martínez     -    nom05 (at) uvigo.es
+##  Copyright (C) 2023 Nicolás Otero Martínez     -    nom05 (at) uvigo.es
 ##                     Marcos Mandado Alonso      -  mandado (at) uvigo.es
 ##                     Ricardo A. Mosquera Castro - mosquera (at) uvigo.es
 ## 
@@ -111,5 +111,6 @@ add_executable(fukui.x
       fukui.f90
       help.f90
       goon.f90
+      onlygrid.f90
       ${OMP}
 )

@@ -1,6 +1,6 @@
 ! ** modules/main.f90 >> Main module where default values and arrays are set + Subroutines of general use in fukui program
 !
-!  Copyright (c) 2022  Nicolás Otero Martínez - Marcos Mandado Alonso - Ricardo A. Mosquera Castro
+!  Copyright (c) 2023  Nicolás Otero Martínez - Marcos Mandado Alonso - Ricardo A. Mosquera Castro
 !  This file is part of the fukui program available in:
 !      https://github.com/nom05/fukui
 !
@@ -19,69 +19,96 @@ module main
 
   implicit none
 
-  integer             ,parameter,public  :: dp        = real64     &
-                                          , i4        = int32      &
-                                          , ou        = output_unit 
+  integer             ,parameter,public  :: dp        = real64      &
+                                          , i4        = int32       &
+                                          , ou        = output_unit
 
 !! Default parameters in program
 !! * DEFAULT CUT-OFF VALUES
-  real     (kind = dp),parameter,public  :: ctffddef  =      18._dp& !! * Skipping gaussian functions (max distance in au for further primitives).
-                                          , ctffgdef  = 1.0E-10    & !! * Skipping points (neglibible gaussian quadrature weights).
-                                          , ctffrdef  = 5.0E-09      !! * Skipping points (negligible reference electron dens.).
+  real     (kind = dp),parameter,public  :: ctffddef  =      18._dp & !! * Skipping gaussian functions (max distance in au for further primitives).
+                                          , ctffgdef  = 1.0E-10     & !! * Skipping points (neglibible gaussian quadrature weights).
+                                          , ctffrdef  = 5.0E-09       !! * Skipping points (negligible reference electron dens.).
 !! *         CUT-OFF VARS
   real     (kind = dp)          ,public  :: ctffg = 0._dp,ctffr = 0._dp,ctffd
 !! * MAX DEFAULT DIMENSIONS                             7654321
-  integer  (kind = i4),parameter,public  :: natomxdef =      50    & !! * max # atoms.
-                                          , nommxdef  =     250    & !! * max # molecular orbitals.
-                                          , npmxdef   = 1000000    & !! * max # points.
-                                          , nprimxdef =    1000      !! * max # primitive functions.
+  integer  (kind = i4),parameter,public  :: natomxdef =      50     & !! * max # atoms.
+                                          , nommxdef  =     250     & !! * max # molecular orbitals.
+                                          , npmxdef   = 1000000     & !! * max # points.
+                                          , nprimxdef =    1000       !! * max # primitive functions.
 !!                                                      7654321
 !! * MAX         DIMENSIONS                                    
-  integer  (kind = i4)          ,public  :: natomx    = natomxdef  &
-                                          , nommx     = nommxdef   &
-                                          , npmx      = npmxdef    &
+  integer  (kind = i4)          ,public  :: natomx    = natomxdef   &
+                                          , nommx     = nommxdef    &
+                                          , npmx      = npmxdef     &
                                           , nprimx    = nprimxdef
 !! * PROGRAM VERSION
-  character(len  =  6),parameter,public  :: version   = '220301'
+  character(len  =  6),parameter,public  :: version   = '231003'
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  integer  (kind = i4)          ,public  :: itype     =   0          !! Types of calculations:
+                                                                     !!      xx
+                                                                     !!      ||-> AOM
+                                                                     !!      |--> Dip
+                                                                     !!
+                                                                     !!     bin-dec
+                                                                     !!   *  00-  0: e density
+                                                                     !!   *  01-  1: e density + AOM
+                                                                     !!   *  10-  2: e density + dip moment
+                                                                     !!   *  11-  3: e density + dip moment + AOM
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!0123456789012345678901234567890
+  character(len  = 22),parameter,dimension(0:3),public &
+                                         :: txttype   = (/ 'e dens                ' &
+                                                         , 'e dens + AOM          ' &
+                                                         , 'e dens + dip mom      ' &
+                                                         , 'e dens + dip mom + AOM' /)
+
   integer  (kind = i4)          ,public  :: igrid     =   0          !! Grid format (stk=0 default, cube=1).
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 ! ... File units
-  integer  (kind = i4),parameter,public  :: iwfn      =  15        &
-                                          , istk      =  16        &
-                                          , ifuk      =  17        &
-                                          , isom      =  18        &
-                                          , iskp      =  19        &
-                                          , iproc     =  20        &
-                                          , imxdm     =  21        &
-                                          , iaom      =  22
+  integer  (kind = i4),parameter,public  :: iwfn      =  15         &
+                                          , istk      =  16         &
+                                          , ifuk      =  17         &
+                                          , isom      =  18         &
+                                          , iskp      =  19         &
+                                          , iproc     =  20         &
+                                          , imxdm     =  21         &
+                                          , iaom      =  22         &
+                                          , idip      =  23
 
 ! ... Options in program if file units exist + paralelization
-  logical                       ,public  :: loptions(9)            &
-                                          , runparal = .TRUE.      &
-                                          , lproc    = .FALSE.     &
-                                          , sigpi    = .FALSE.     &
-                                          , lsg      = .FALSE.     &
-                                          , lskpd    = .FALSE.     &
-                                          , lskp     = .FALSE.     &
-                                          , lskpr    = .FALSE.     &
-                                          , lpi      = .FALSE.     &
-                                          , laom     = .FALSE.
-  equivalence                              (loptions(1),runparal)  &
-                                          ,(loptions(2),lproc   )  &
-                                          ,(loptions(3),sigpi   )  &
-                                          ,(loptions(4),lsg     )  &
-                                          ,(loptions(5),lskpd   )  &
-                                          ,(loptions(6),lskp    )  &
-                                          ,(loptions(7),lskpr   )  &
-                                          ,(loptions(8),lpi     )  &
-                                          ,(loptions(9),laom    )
+  logical                       ,public  :: loptions(11)            &
+                                          , runparal  = .TRUE.      & !!  1
+                                          , lproc     = .FALSE.     & !!  2
+                                          , sigpi     = .FALSE.     & !!  3
+                                          , lsg       = .FALSE.     & !!  4
+                                          , lskpd     = .FALSE.     & !!  5
+                                          , lskp      = .FALSE.     & !!  6
+                                          , lskpr     = .FALSE.     & !!  7
+                                          , lpi       = .FALSE.     & !!  8
+                                          , laom      = .FALSE.     & !!  9
+                                          , ldip      = .FALSE.     & !! 10
+                                          , lonlygrid = .FALSE.       !! 11
+  equivalence                              (loptions( 1),runparal ) &
+                                          ,(loptions( 2),lproc    ) &
+                                          ,(loptions( 3),sigpi    ) &
+                                          ,(loptions( 4),lsg      ) &
+                                          ,(loptions( 5),lskpd    ) &
+                                          ,(loptions( 6),lskp     ) &
+                                          ,(loptions( 7),lskpr    ) &
+                                          ,(loptions( 8),lpi      ) &
+                                          ,(loptions( 9),laom     ) &
+                                          ,(loptions(10),ldip     ) &
+                                          ,(loptions(11),lonlygrid)
 
-! ... # args., # procs., specified atom
-  integer  (kind = i4)          ,public  :: nproc, iato = 0
+! ... # args., # procs., specified atom, default # part to divide grid (w/o parallelization)
+  integer  (kind = i4)          ,public  :: nproc, iato = 0, ipartdef = 8
 
 ! ... Partial times
   real     (kind = dp),dimension(100)    :: ptime = 0._dp
   real     (kind = dp),public            :: wtim0,cptim0,totim0
+
+! ... Dipole moment: Cartesian coordinates backup if atom is included, dipole moments from grid
+  real     (kind = dp),allocatable,dimension(:),public &
+                                         :: coord,dipgrid,dipgridsk
 
   contains
 
@@ -275,7 +302,7 @@ module main
   
       implicit none
 
-      integer  ( kind=i4  )            :: n,nlength
+      integer  ( kind=i4  )            :: n,nlength,nproccalc
       integer  ( kind=i4  ),parameter  :: ntotchar=30
       real     ( kind=dp  )            :: tmp
       character(  len=*   ),intent(in) :: text
@@ -318,7 +345,9 @@ module main
                 label    = '(10X,"PERFORMANCE",1X,32("."),1X)'
                 write(ou  ,label,advance='NO')
                 write(ifuk,label,advance='NO')
-                call dbl2str(100_dp*(totim0-cptim0)/tmp/nproc,2,iprint=ifuk,post='%',avanza=.TRUE.)
+                nproccalc = nproc
+                if (nproc.EQ.0) nproccalc = 1
+                call dbl2str(100._dp*(totim0-cptim0)/tmp/nproccalc,2,iprint=ifuk,post='%',avanza=.TRUE.)
                 write(ou  ,'(/)')
                 write(ifuk,'(/)')
       endif !! (.NOT.lfinaldef) then

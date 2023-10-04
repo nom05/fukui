@@ -1,7 +1,7 @@
 ! ** ./fukui.f90 >> Program to calculate electron densities from a set of points and calculate atomic overlap matrices 
 !                   (read from a .stk or cube files) by means of the use of a .wfn file.
 !
-!  Copyright (c) 2022  Nicolás Otero Martínez - Marcos Mandado Alonso - Ricardo A. Mosquera Castro
+!  Copyright (c) 2023  Nicolás Otero Martínez - Marcos Mandado Alonso - Ricardo A. Mosquera Castro
 !  This file is part of the fukui program available in:
 !      https://github.com/nom05/fukui
 !
@@ -17,14 +17,21 @@
 program fukui
 
 ! VERSIONS and CHANGELOG
-!  * Version 1 (Mars 10 2007).
-!  * Version 2 (December 1 2008) prints Sij atomic component. Based on the program desglose-e7.f.
-!  * Version 151203. Restricted/unrestricted, it prints more info in the output,
-!    sigma/pi or only pi calculations, skips points with a very low gaussian quadrature
-!    weight (optional), skip points with a low reference electron density, reads max dims 
-!    of arrays from a external file in the source code.
-!  * Version 151207. Each subroutine/function is a file, CMake is hereinafter
-!    employed.
+!  * Version 231003  - Include dipole moment partitioning: charge transfer and intrinsic components.
+!                    - Adding dipole moment calculation from the grid file as well.
+!                    - Fixed problem with automatic parallelization in serial executions.
+!                    - Fixed problem with performance calculation.
+!                    - Cleaning code in computation module.
+!                    - Added parallelization in the stk files.
+!  * Version 220322: - First f90 modular version.
+!                    - Quicksort dependency is removed from the code.
+!                    - Cube files support.
+!  * Version 211230: - cube file support.
+!  * Version 211229: - fukui detects if the stk is binary or text. Utils updated.
+!  * Version 211126: - New quicksort code is added from https://github.com/mcuntz/jams_fortran.git (MIT license)
+!                    - Support to read .sg files (Sigma/Pi separation or MO specification). .sg files have more 
+!                      priority than .som files (they are searched first)
+!  * Version 161103: - Adapted to work with wfn file obtained by means of AIMAll.
 !  * Version 160708: - New structure of code.
 !                    - New subroutine 'goon'
 !                    - OpenMP parallelization.
@@ -42,34 +49,35 @@ program fukui
 ! these arrays gets allocated on the stack of the routine. The default stack limits on the operative systems are
 ! very restrictive, hence the segmentation fault is observed. To avoid this, I have defined these arrays by means of
 ! allocatable variables.
-!  * Version 161103: - Adapted to work with wfn file obtained by means of AIMAll.
-!  * Version 211126: - New quicksort code is added from https://github.com/mcuntz/jams_fortran.git (MIT license)
-!                    - Support to read .sg files (Sigma/Pi separation or MO specification). .sg files have more 
-!                      priority than .som files (they are searched first)
-!  * Version 211229: - fukui detects if the stk is binary or text. Utils updated.
-!  * Version 211230: - cube file support
-!  * Version 220322: - First f90 modular version
-!                    - Quicksort dependency is removed from the code
-!                    - Cube files support
+!  * Version 151207. Each subroutine/function is a file, CMake is hereinafter
+!    employed.
+!  * Version 151203. Restricted/unrestricted, it prints more info in the output,
+!    sigma/pi or only pi calculations, skips points with a very low gaussian quadrature
+!    weight (optional), skip points with a low reference electron density, reads max dims 
+!    of arrays from a external file in the source code.
+!  * Version 2 (December 1 2008) prints Sij atomic component. Based on the program desglose-e7.f.
+!  * Version 1 (Mars 10 2007).
 !
 !!! ... Define default parameters
 
-  use           :: main                   ,  only: ou,i4,version,runparal,nproc,igrid        &
-                                                 , iwfn,ifuk,iproc,isom,iskp,istk               &
+  use           :: main                   ,  only: ou,i4,version,runparal,nproc,igrid           &
+                                                 , iwfn,ifuk,iproc,isom,iskp,istk,idip          &
                                                  , nlines,imxdm,natomx,nommx,npmx,nprimx        &
                                                  , sigpi,lsg,lproc,lpi,lskpd,lskp,lskpr,laom    &
                                                  , ctffd,ctffddef,ctffg,ctffgdef,ctffr,ctffrdef &
-                                                 , sudgfchk,prepnumb,int2str,dbl2str            &
+                                                 , sudgfchk,prepnumb,int2str,dbl2str,ldip       &
                                                  , print_rdarr,print_second,print_main          &
-                                                 , partial_time,cptim0,totim0
+                                                 , partial_time,cptim0,totim0,itype,iato        &
+                                                 , minusculas,lonlygrid
   use           :: grid                   ,  only: openstk
+  use           :: omp_lib !! Enabling OpenMP functions !!
 
   implicit none
 
 ! ... # args., # procs., specified atom
   integer  (kind = i4)                          :: iarg
 ! ... Temporary variables
-  integer  (kind = i4)                          :: i,iato
+  integer  (kind = i4)                          :: i
   character(len  =  4)                          :: ext
   character(len  =  4),parameter,dimension(0:1) :: gridext=(/'stk ','cube'/)
 ! ... Logical variables
@@ -78,16 +86,17 @@ program fukui
   integer  (kind = i4)                          :: ntime = 0
 
 ! ... File names and so on
-  character                                     :: file1*100,fproc*105,fwfn*104,file2*105,fstk*109,ffuk*209 &
-                                                 , fmxdm*105,fsom*104,fskpd*104,fskp*104,fskpr*104,fpi*104  &
-                                                 , faom*104
+  character                                     :: file1*100,fproc*105,fwfn*104 ,file2*105,fstk*109 ,ffuk*209 &
+                                                 , fmxdm*105,fsom*104 ,fskpd*104,fskp*104 ,fskpr*104,fpi*104  &
+                                                 , faom*104 ,fdip*104                                         &
+                                                 , txtopt*20
 
   interface
     subroutine help
     end subroutine help
-    subroutine goon(i,j)
+    subroutine goon(ii)
       use :: main,only: i4
-      integer(kind = i4) :: i,j
+      integer(kind = i4) :: ii,j
     end subroutine goon
     subroutine init_par
     end subroutine init_par
@@ -189,6 +198,8 @@ program fukui
      write(ou  ,'(A)') int2str(nproc)
      write(ifuk,'(A)') int2str(nproc)
   else
+     call    OMP_SET_NUM_THREADS(1)
+     call print_main(trim(fproc)//" not found. One processor was set!!")
      runparal = .FALSE.
   endif !! (lproc) then
 !
@@ -291,7 +302,43 @@ program fukui
 ! 
   faom  = file1(1:index(file1,' ')-1)//'.aom'
   inquire(file=faom ,exist=laom )
-  if (laom ) call print_main(".aom file detected ("//trim(faom)//"). Atomic overlap matrix will be calculated")
+  if (laom ) call print_main(".aom file detected ("//trim(faom)//"). Atomic overlap matrix will be generated")
+!
+! Activate dipole moment partitioning if .dip file is detected.
+! 
+  fdip  = file1(1:index(file1,' ')-1)//'.dip'
+  inquire(file=fdip ,exist=ldip )
+  if (ldip ) then
+     call print_main(".dip file detected ("//trim(fdip)//"). Dipole moment will be partitioned")
+     open (unit=idip,file=fdip,status='old',form='formatted')
+     txtopt(:) = ''
+     read (idip,*,iostat=i) txtopt(:)
+     if (.NOT.is_iostat_end(i)) then
+        if (i.NE.0) stop 'ERROR: Something is wrong with .dip file.'
+        select case(minusculas(trim(txtopt)))
+          case('onlygrid')
+            lonlygrid = .TRUE.
+            call print_second("OPTIONAL: Only grid file will be considered")
+          case default
+            stop 'ERROR: Unknown option in .dip file'
+        end select !! case(trim(txtopt))
+     endif !! (is_iostat_end(i)) then
+     close(idip)
+  endif !! (ldip ) then
+!
+! Setting calculation type. Binary system:
+!    xx
+!    ||-> AOM
+!    |--> Dip
+!
+!   bin-dec:
+!   *  00-  0  : e density
+!   *  01-    1: e density + AOM
+!   *  10-  2  : e density + dip moment
+!   *  11-  2+1: e density + dip moment + AOM
+!
+  if (laom ) itype = itype+1
+  if (ldip ) itype = itype+2
 !
 ! Opening files
 !
@@ -317,7 +364,11 @@ program fukui
 !
 ! Using main computing subroutine
 !
-  call       goon(iato,ntime)
+if (lonlygrid) then
+  call onlygrid(ntime)
+else
+  call     goon(ntime)
+end if !! (lonlygrid) then
 !
 ! Close files:
 !

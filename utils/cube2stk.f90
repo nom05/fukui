@@ -1,6 +1,6 @@
 ! ** utils/cube2stk.f90 >> Utility to transform cube files into stk files
 !
-!  Copyright (c) 2022  Nicolás Otero Martínez - Marcos Mandado Alonso - Ricardo A. Mosquera Castro
+!  Copyright (c) 2023  Nicolás Otero Martínez - Marcos Mandado Alonso - Ricardo A. Mosquera Castro
 !  This file is part of the fukui program available in:
 !      https://github.com/nom05/fukui
 !

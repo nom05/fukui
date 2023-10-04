@@ -1,6 +1,6 @@
 ! ** modules/wfn.f90 >> Main module to read wfn file
 !
-!  Copyright (c) 2022  Nicolás Otero Martínez - Marcos Mandado Alonso - Ricardo A. Mosquera Castro
+!  Copyright (c) 2023  Nicolás Otero Martínez - Marcos Mandado Alonso - Ricardo A. Mosquera Castro
 !  This file is part of the fukui program available in:
 !      https://github.com/nom05/fukui
 !
@@ -123,7 +123,7 @@ module wfn
       write(ifuk,'("OK")')
     end subroutine rdarr_xyzq
 
-    subroutine ler_wfn
+    subroutine readwfn
 !
 !  LE TODA A INFORMACION DO ARQUIVO .WFN INCLUINDO OS VALORES DA ENERXIA
 !  ELECTRONICA TOTAL (enerx) E DA RELACION VIRIAL (virial) XUNTO COA
@@ -160,7 +160,7 @@ module wfn
      enddo 
      backspace (iwfn)
 !
-! Read # of MO, primitives and atoms
+! Read # of MOs, primitives and atoms
 !
      read (iwfn,'(19X,I4,15X,I5,17X,I3)',iostat=i) nom,nprim,nato
      call print_second(int2str(nom)//" MOs, "//int2str(nprim)//" gaussian functions, "//int2str(nato)//" atoms.")
@@ -231,11 +231,11 @@ module wfn
                                                     eom(ialfa),eom(ialfa+1)
      endif !! (nint(pel(1)).NE.2) then
 !
-!  lectura da enerx¡a electronica e da relacion virial
+!  Read electronic energy and virial relationship
 !
 !    read (iwfn,*)  !! Not needed
 
-   end subroutine ler_wfn
+   end subroutine readwfn
 
    subroutine deallocate_wfn
      implicit none
@@ -244,5 +244,50 @@ module wfn
      if (allocated(c))          deallocate(c)
      if (allocated(eom))        deallocate(eom)
    end subroutine deallocate_wfn
+   
+   subroutine read_nuclei_coord_from_wfn
+     use :: main,            only: i4,ou,iwfn,natomx,print_second,int2str
+     implicit none
+     integer  (kind = i4)       :: i
+     character( len = 80)       :: lin1
+     LOGICAL                    :: lcheck
+     rewind(iwfn)
+     do 
+        read (iwfn,'(A80)',iostat=i) lin1
+        if ( index(trim(lin1),'GAUSSIAN').GT.0) exit
+        if ( index(trim(lin1),'GTO'     ).GT.0) exit
+        if (i.NE.0) stop 'ERROR: Wrong wfn file? Unable to find line with dimensions'
+     enddo 
+     backspace(iwfn)
+!
+! Read # of MOs, primitives and atoms
+!
+     read (iwfn,'(60X,I3)',iostat=i) nato
+     call print_second(int2str(nato)//" atoms.")
+!
+! Check dimensions.
+!
+     lcheck = .TRUE.
+     if (natomx.LT.nato) then
+        lcheck = .FALSE.
+        write(ou,'(" ** Increase  natomx **",A,"=old value < nato =",A)') int2str(natomx),int2str(nato)
+     endif !! (natomx.LT.nato) then
+     if (.NOT.lcheck) stop ' ** Edit source code in main module or create a file with extension .mxal following the manual **'
+!
+! Allocate main arrays
+!
+     allocate(nuclei(nato))
+!
+! Reading data blocks
+!
+     call readblock(nuclei%x,nuclei%y,nuclei%z,nuclei%ZZ,iwfn,nato,"Coordinates and nuclear charges")
+
+!$omp parallel default (none) shared ( nheavy,nuclei )
+  !$omp workshare
+     nheavy = count(nuclei%ZZ>1)
+  !$omp end workshare
+!$omp end parallel
+
+   end subroutine read_nuclei_coord_from_wfn
 
 end module wfn

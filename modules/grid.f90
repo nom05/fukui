@@ -1,6 +1,6 @@
 ! ** modules/grid.f90 >> Main module to process (stk or cube) grid files
 !
-!  Copyright (c) 2022  Nicolás Otero Martínez - Marcos Mandado Alonso - Ricardo A. Mosquera Castro
+!  Copyright (c) 2023  Nicolás Otero Martínez - Marcos Mandado Alonso - Ricardo A. Mosquera Castro
 !  This file is part of the fukui program available in:
 !      https://github.com/nom05/fukui
 !
@@ -148,16 +148,33 @@ module grid
   end subroutine readgrid
 
   subroutine le1_stk(totpop)
-    use :: main                 ,only : int2str,minusculas,print_second,print_rdarr
+    use :: main                               ,only: int2str,minusculas,print_second,print_rdarr &
+                                                   , ldip,coord,iato,dipgrid !! Dipole moment
+    use :: wfn                                ,only: nuclei
     implicit none
-    integer  (kind = i4)             :: i,j
-    real     (kind = dp),intent(out) :: totpop
-    real     (kind = dp)             :: rhp
-    character(len  = 51)             :: customfmt
+    integer  (kind = i4)                          :: i,j
+    real     (kind = dp),intent(out)              :: totpop
+    real     (kind = dp),allocatable,dimension(:) :: tmparray
+    character(len  = 51)                          :: customfmt
 
     rewind(istk)
     totpop       = 0._dp
     customfmt(:) = ''
+    if (ALLOCATED(tmparray)) stop 'Temporary array unexpectly allocated'
+    allocate(tmparray(nptos))
+
+    if (ldip) then
+       if (.NOT.ALLOCATED(coord)  ) allocate(coord(3)  )
+       if (.NOT.ALLOCATED(dipgrid)) allocate(dipgrid(3))
+       coord     = 0._dp
+       dipgrid   = 0._dp
+       if (iato.NE.0) then
+          coord(1) = nuclei(iato)%x
+          coord(2) = nuclei(iato)%y
+          coord(3) = nuclei(iato)%z
+       endif !! (iato.NE.0) then
+    endif !! (ldip) then
+
     if (is_stk_bin) then
        read (istk,'(A)',iostat=i) customfmt
        if (i.NE.0) stop 'ERROR while reading stk file. Abnormal format line'
@@ -168,8 +185,7 @@ module grid
        if (index(minusculas(customfmt),'free').GT.0) then
           call print_second("Free-format ordinary text stk file")
           do j = 1,nptos
-             read (istk,*,iostat=i,err=2) points(j)%x,points(j)%y,points(j)%z,points(j)%w,rhp
-             totpop = totpop + points(j)%w*rhp
+             read (istk,*,iostat=i,err=2) points(j)%x,points(j)%y,points(j)%z,points(j)%w,tmparray(j)
           enddo 
        else
           call print_rdarr("Custom-format ordinary text stk file: ")
@@ -198,35 +214,75 @@ module grid
                    ).LE.0)                                                     &
              stop 'ERROR while reading stk file. Add final parenthesis "( )" to the custom format'
           do j = 1,nptos
-             read (istk,trim(customfmt),end=2,iostat=i) points(j)%x,points(j)%y,points(j)%z,points(j)%w,rhp
-             totpop = totpop + points(j)%w*rhp
+             read (istk,trim(customfmt),end=2,iostat=i) points(j)%x,points(j)%y,points(j)%z &
+                                                      , points(j)%w,tmparray(j)
           enddo 
+          if (i.NE.0) stop 'ERROR while reading stk file. Abnormal formatted line'
        endif !! (index(minusculas(customfmt),'free').GT.0) then
     else
        call print_second("Binary stk file")
        do j = 1,nptos
-          read (istk,end=2,iostat=i)  points(j)%x,points(j)%y,points(j)%z,points(j)%w,rhp
-          totpop  = totpop + points(j)%w*rhp
+          read (istk,end=2,iostat=i)  points(j)%x,points(j)%y,points(j)%z,points(j)%w,tmparray(j)
        enddo 
     endif !! (lfmtstk) then
 2   if (i.NE.0) stop ' ERROR: Unknown problem with stk file while reading'
+
+!$omp parallel default (none) shared (totpop,points,tmparray)
+  !$omp workshare
+             totpop     = sum( points(:)%w * tmparray(:))
+  !$omp end workshare
+!$omp end parallel
+
+          if (ldip) then
+
+!$omp parallel default (none) shared (points,tmparray,dipgrid,coord)
+  !$omp workshare
+             dipgrid(1) = sum(-points(:)%w * tmparray(:) * (points(:)%x-coord(1)))
+             dipgrid(2) = sum(-points(:)%w * tmparray(:) * (points(:)%y-coord(2)))
+             dipgrid(3) = sum(-points(:)%w * tmparray(:) * (points(:)%z-coord(3)))
+  !$omp end workshare
+!$omp end parallel
+
+          endif !! (ldip) then
+
+    if (ALLOCATED(tmparray)) deallocate(tmparray)
+
   end subroutine le1_stk
 
   subroutine le1_stksk(totpop,totpopsk,nptst)
-    use :: main,                  only: int2str,minusculas,cutoff=>ctffg,cutoffrho=>ctffr
+    use :: main,                  only: int2str,minusculas,cutoff=>ctffg,cutoffrho=>ctffr &
+                                      , print_second,print_rdarr                          &
+                                      , ldip,coord,iato,dipgrid,dipgridsk !! Dipole moment
+    use ::  wfn,                  only: nuclei
     implicit none
     integer  (kind = i4)             :: nptst,i,j
     real     (kind = dp),intent(out) :: totpop,totpopsk
-    real     (kind = dp)             :: rhp
-    type     (xyzw     ),allocatable :: tmp(:)
+    real     (kind = dp),allocatable :: tmparray(:)
+    logical             ,allocatable :: mask(:)
     character(len  = 51)             :: customfmt
 
     rewind(istk)
-    nptst    = nptos
-    nptos    = 0
     totpop   = 0._dp
     totpopsk = 0._dp
+    nptst    = nptos
     i        = 0
+    if (ALLOCATED(tmparray).OR.ALLOCATED(mask)) stop 'Temporary arrays unexpectly allocated'
+    allocate(tmparray(nptos), mask(nptos))
+
+    if (ldip) then
+       if (.NOT.ALLOCATED(coord)    ) allocate(    coord(3))
+       if (.NOT.ALLOCATED(dipgrid)  ) allocate(  dipgrid(3))
+       if (.NOT.ALLOCATED(dipgridsk)) allocate(dipgridsk(3))
+       coord     = 0._dp
+       dipgrid   = 0._dp
+       dipgridsk = 0._dp
+       if (iato.NE.0) then
+          coord(1) = nuclei(iato)%x
+          coord(2) = nuclei(iato)%y
+          coord(3) = nuclei(iato)%z
+       endif !! (iato.NE.0) then
+    endif !! (ldip) then
+
     if (is_stk_bin) then
        read (istk,'(A)',iostat=i) customfmt !! With free format, the code jumps next line
        if (i.NE.0) stop 'ERROR while reading stk file. Abnormal format line'
@@ -236,19 +292,13 @@ module grid
        endif !! (len_trim(customfmt).GT.len(customfmt)-1)
        i = 0
        if (index(minusculas(customfmt),'free').GT.0) then
-          write(ou,'(10X,"* Free-format ordinary text stk file")')
+          call print_second("Free-format ordinary text stk file")
           do j = 1,nptst
-             nptos = nptos+1
-             read (istk,*,end=2,iostat=i) points(nptos)%x,points(nptos)%y,points(nptos)%z,points(nptos)%w,rhp
-             totpop = totpop + points(nptos)%w*rhp
-             if (points(nptos)%w.LT.cutoff.OR.rhp.LT.cutoffrho) then
-                nptos = nptos-1
-             else
-                totpopsk  = totpopsk + points(nptos)%w*rhp
-             endif !! (points(nptos)w.LT.cutoff) then
-          enddo 
+             read (istk,*,end=2,iostat=i) points(j)%x,points(j)%y,points(j)%z,points(j)%w,tmparray(j)
+          enddo !! j = 1,nptst
        else
-          write(ou,'(10X," * Custom-format ordinary text stk file:",X,A,A,A)') &
+          call print_rdarr("Custom-format ordinary text stk file: ")
+          write(ou,'(A,A,A)') &
                     '"',customfmt(                                             &
                                     index(trim(customfmt),' ',.TRUE.)+1        &
                                               :                                &
@@ -272,47 +322,72 @@ module grid
                         ,')'                                                   &
                    ).LE.0)                                                     &
              stop 'ERROR while reading stk file. Add final parenthesis "( )" to the custom format'
-          do j = 1,nptst
-             nptos = nptos+1
-             read (istk,trim(customfmt),end=2,iostat=i) &
-                    points(nptos)%x,points(nptos)%y,points(nptos)%z,points(nptos)%w,rhp
-             totpop = totpop + points(nptos)%w*rhp
-             if (points(nptos)%w.LT.cutoff.OR.rhp.LT.cutoffrho) then
-                nptos = nptos-1
-             else
-                totpopsk = totpopsk + points(nptos)%w*rhp
-             endif !! (points(nptos)%w.LT.cutoff) then
-          enddo 
+             do j = 1,nptst
+                read (istk,trim(customfmt),end=2,iostat=i) &
+                       points(j)%x,points(j)%y,points(j)%z,points(j)%w,tmparray(j)
+             enddo !! j = 1,nptst
+             if (i.NE.0) stop 'ERROR while reading grid ponts from stk file.'
        endif !! (index(minusculas(customfmt),'free').GT.0) then
     else
-       write(ou,'(10X," * Binary stk file")')
+       call print_second("Binary stk file")
        do j = 1,nptst
-          nptos = nptos+1
-          read (istk,end=2,iostat=i) points(nptos)%x,points(nptos)%y,points(nptos)%z,points(nptos)%w,rhp
-          totpop  = totpop + points(nptos)%w*rhp
-          if (points(nptos)%w.LT.cutoff.OR.rhp.LT.cutoffrho) then
-             nptos = nptos-1
-          else
-             totpopsk = totpopsk + points(nptos)%w*rhp
-          endif !! (points(nptos)%w.LT.cutoff) then
-       enddo 
+          read (istk,end=2,iostat=i) points(j)%x,points(j)%y,points(j)%z &
+                                   , points(j)%w,tmparray(j) !!,rhp
+       enddo !! j = 1,nptst
+       if (i.NE.0) stop 'ERROR while reading grid ponts from stk file.'
     endif !! (is_stk_bin) then
  2  if (i.GT.0) stop ' ** Some problem with stk file **'
- ! Reducing arrays size. increasing memory fragmention?
-    call move_alloc(points,tmp)
-    allocate(points,source=tmp(:nptos))
-    deallocate(tmp)
+
+!$omp parallel default (none) shared &
+!$omp                                ( mask, points, tmparray, cutoff, cutoffrho  &
+!$omp                                , nptos                                      &
+!$omp                                , totpop                                     &
+!$omp                                , totpopsk                                   &
+!$omp                                )
+  !$omp workshare
+    mask(:)      = points(:)%w.GE.cutoff .AND. tmparray(:).GE.cutoffrho
+    nptos        = COUNT(mask(:))
+    totpop       =   SUM( points(:)%w * tmparray(:))
+    totpopsk     =   SUM( points(:)%w * tmparray(:), mask)
+  !$omp end workshare
+!$omp end parallel
+
+    if (ldip) then
+
+!$omp parallel default (none) shared ( points, tmparray, mask, dipgrid, coord, dipgridsk )
+  !$omp workshare
+         dipgrid(1) =   SUM(-points(:)%w * tmparray(:) * (points(:)%x-coord(1)))
+         dipgrid(2) =   SUM(-points(:)%w * tmparray(:) * (points(:)%y-coord(2)))
+         dipgrid(3) =   SUM(-points(:)%w * tmparray(:) * (points(:)%z-coord(3)))
+       dipgridsk(1) =   SUM(-points(:)%w * tmparray(:) * (points(:)%x-coord(1)), mask)
+       dipgridsk(2) =   SUM(-points(:)%w * tmparray(:) * (points(:)%y-coord(2)), mask)
+       dipgridsk(3) =   SUM(-points(:)%w * tmparray(:) * (points(:)%z-coord(3)), mask)
+  !$omp end workshare
+!$omp end parallel
+
+    endif !! (ldip) then
+
+!$omp parallel default (none) shared ( mask, points )
+  !$omp workshare
+    points       =  PACK( points, mask)
+  !$omp end workshare
+!$omp end parallel
+
+    if (ALLOCATED(tmparray)) deallocate(tmparray)
+    if (ALLOCATED(mask)    ) deallocate(mask)
 
   end subroutine le1_stksk
 
   subroutine readcube(totpop,totpopsk,nptst)
-    use :: main,                              only: int2str,dbl2str,minusculas,cutoffrho=>ctffr,print_rdarr
+    use :: main,                              only: int2str,dbl2str,minusculas,cutoffrho=>ctffr,print_rdarr &
+                                                  , ldip,coord,iato,dipgrid,dipgridsk !! Dipole moment
+    use ::  wfn,                              only: nuclei
     implicit none
     integer  (kind= i4)                          :: nptst
     integer  (kind= i4)                          :: i1,i2,i3,n
     real     (kind= dp),intent(out)              :: totpop,totpopsk
     integer  (kind= i4)                          :: ipar(0:3),natoms,nslow,ninter,nfast
-    real     (kind= dp)                          :: vectors(0:3,3),scalefactor
+    real     (kind= dp)                          :: vectors(0:3,3),scalefactor,vec(3)
     real     (kind= dp),allocatable,dimension(:) :: tmparray
     character( len=100)                          :: tmptxt
 
@@ -375,47 +450,114 @@ module grid
         write(ou  ,'(A)') 'Unknown'
         write(ifuk,'(A)') 'Unknown'
     end select
-    if (lskpr) then
-       do i1 = 1,nslow
-          do i2 = 1,ninter
-             read (istk,*) tmparray(:)
+    if (ldip) then
+       if   (.NOT.ALLOCATED(coord)    ) allocate(coord(3)    )
+       if   (.NOT.ALLOCATED(dipgrid)  ) allocate(dipgrid(3)  )
+       dipgrid = 0._dp
+       if (lskpr) then
+         if (.NOT.ALLOCATED(dipgridsk)) allocate(dipgridsk(3))
+         dipgridsk = 0._dp
+       endif !! (lskpr) then
+       if (iato.NE.0) then
+          coord(1) = nuclei(iato)%x
+          coord(2) = nuclei(iato)%y
+          coord(3) = nuclei(iato)%z
+       endif !! (iato.NE.0) then
+       if (lskpr) then
+          do i1 = 1,nslow
+             do i2 = 1,ninter
+                read (istk,*) tmparray(:)
 !$omp parallel default (none) shared ( totpop,totpopsk,tmparray,cutoffrho,nptos )
   !$omp workshare
-             totpop   = totpop   +   sum(tmparray)
-             totpopsk = totpopsk +   sum(tmparray,mask=tmparray.GT.cutoffrho)
-             nptos    = nptos    + count(tmparray.GT.cutoffrho)
+                totpop   = totpop   +   sum(tmparray)
+                totpopsk = totpopsk +   sum(tmparray,mask=tmparray.GT.cutoffrho)
+                nptos    = nptos    + count(tmparray.GT.cutoffrho)
   !$omp end workshare
 !$omp end parallel
-             do i3 = 1,nfast
-                if (tmparray(i3).GT.cutoffrho) then
-                   n     = n+1
-                   points(n)%x = vectors(0,1)+(i1-1)*vectors(1,1)+(i2-1)*vectors(2,1)+(i3-1)*vectors(3,1)
-                   points(n)%y = vectors(0,2)+(i1-1)*vectors(1,2)+(i2-1)*vectors(2,2)+(i3-1)*vectors(3,2)
-                   points(n)%z = vectors(0,3)+(i1-1)*vectors(1,3)+(i2-1)*vectors(2,3)+(i3-1)*vectors(3,3)
-                endif !! (tmparray(i3).GT.cutoffrho) then
-             enddo !! I3 = 1,nfast
-          enddo !! I2 = 1,ninter
-       enddo !! I1 = 1,nslow
+                do i3 = 1,nfast
+                   vec(:)     = vectors(0,:)+(i1-1)*vectors(1,:)+(i2-1)*vectors(2,:)+(i3-1)*vectors(3,:)
+                   dipgrid(:) = dipgrid(:) - tmparray(i3)*(vec(:)-coord(:))
+                   if (tmparray(i3).GT.cutoffrho) then
+                      n            = n+1
+                      points(n)%x  = vec(1)
+                      points(n)%y  = vec(2)
+                      points(n)%z  = vec(3)
+                      dipgridsk(:) = dipgridsk(:) - tmparray(i3)*(vec(:)-coord(:))
+                   endif !! (tmparray(i3).GT.cutoffrho) then
+                enddo !! I3 = 1,nfast
+             enddo !! I2 = 1,ninter
+          enddo !! I1 = 1,nslow
+       else
+          nptos   = 0
+          totpop  = 0._dp
+          if (nptst.NE.nslow*ninter*nfast) stop 'ERROR: initial # points != # points read.'
+          do i1 = 1,nslow
+             do i2 = 1,ninter
+                read (istk,*) tmparray(:)
+!$omp parallel default (none) shared ( totpop,tmparray,nptos )
+  !$omp workshare
+                totpop = totpop +  sum(tmparray)
+  !$omp end workshare
+!$omp end parallel
+                do i3 = 1,nfast
+                   nptos           = nptos + 1
+                   vec(:)          = vectors(0,:)+(i1-1)*vectors(1,:)+(i2-1)*vectors(2,:)+(i3-1)*vectors(3,:)
+                   dipgrid(:)      = dipgrid(:) - tmparray(i3)*(vec(:)-coord(:))
+                   points(nptos)%x = vec(1)
+                   points(nptos)%y = vec(2)
+                   points(nptos)%z = vec(3)
+                enddo !! I3 = 1,nfast
+             enddo !! I2 = 1,ninter
+          enddo !! I1 = 1,nslow
+       endif !! (lskpr) then
     else
-       nptos   = 0
-       totpop  = 0._dp
-       if (nptst.NE.nslow*ninter*nfast) stop 'ERROR: initial # points != # points read.'
-       do i1 = 1,nslow
-          do i2 = 1,ninter
-             read (istk,'(6(E13.5))') tmparray(:)
-             totpop = totpop + sum(tmparray)
-             do i3 = 1,nfast
-                nptos     = nptos + 1
-                points(nptos)%x = vectors(0,1)+(i1-1)*vectors(1,1)+(i2-1)*vectors(2,1)+(i3-1)*vectors(3,1)
-                points(nptos)%y = vectors(0,2)+(i1-1)*vectors(1,2)+(i2-1)*vectors(2,2)+(i3-1)*vectors(3,2)
-                points(nptos)%z = vectors(0,3)+(i1-1)*vectors(1,3)+(i2-1)*vectors(2,3)+(i3-1)*vectors(3,3)
-             enddo !! I3 = 1,nfast
-          enddo !! I2 = 1,ninter
-       enddo !! I1 = 1,nslow
-    endif !! (lskpr) then
-    points(:nptos)%w = scalefactor
-    totpop     = totpop * scalefactor
-    if (lskpr) totpopsk  = totpopsk*scalefactor
+       if (lskpr) then
+          do i1 = 1,nslow
+             do i2 = 1,ninter
+                read (istk,*) tmparray(:)
+!$omp parallel default (none) shared ( totpop,totpopsk,tmparray,cutoffrho,nptos )
+  !$omp workshare
+                totpop   = totpop   +   sum(tmparray)
+                totpopsk = totpopsk +   sum(tmparray,mask=tmparray.GT.cutoffrho)
+                nptos    = nptos    + count(tmparray.GT.cutoffrho)
+  !$omp end workshare
+!$omp end parallel
+                do i3 = 1,nfast
+                   if (tmparray(i3).GT.cutoffrho) then
+                      n            = n+1
+                      vec(:)       = vectors(0,:)+(i1-1)*vectors(1,:)+(i2-1)*vectors(2,:)+(i3-1)*vectors(3,:)
+                      points(n)%x  = vec(1)
+                      points(n)%y  = vec(2)
+                      points(n)%z  = vec(3)
+                   endif !! (tmparray(i3).GT.cutoffrho) then
+                enddo !! I3 = 1,nfast
+             enddo !! I2 = 1,ninter
+          enddo !! I1 = 1,nslow
+       else
+          nptos   = 0
+          totpop  = 0._dp
+          if (nptst.NE.nslow*ninter*nfast) stop 'ERROR: initial # points != # points read.'
+          do i1 = 1,nslow
+             do i2 = 1,ninter
+                read (istk,*) tmparray(:)
+                totpop = totpop + sum(tmparray)
+                do i3 = 1,nfast
+                   nptos           = nptos + 1
+                   points(nptos)%x = vectors(0,1)+(i1-1)*vectors(1,1)+(i2-1)*vectors(2,1)+(i3-1)*vectors(3,1)
+                   points(nptos)%y = vectors(0,2)+(i1-1)*vectors(1,2)+(i2-1)*vectors(2,2)+(i3-1)*vectors(3,2)
+                   points(nptos)%z = vectors(0,3)+(i1-1)*vectors(1,3)+(i2-1)*vectors(2,3)+(i3-1)*vectors(3,3)
+                enddo !! I3 = 1,nfast
+             enddo !! I2 = 1,ninter
+          enddo !! I1 = 1,nslow
+       endif !! (lskpr) then
+    endif !! (ldip) then
+    points(:nptos)%w           =                scalefactor
+    totpop                     = totpop       * scalefactor
+    if (lskpr) totpopsk        = totpopsk     * scalefactor
+    if (ldip ) then
+       dipgrid(:)              = dipgrid(:)   * scalefactor
+       if (lskpr) dipgridsk(:) = dipgridsk(:) * scalefactor
+    endif !! (ldip ) then
     deallocate(tmparray)
   end subroutine
 

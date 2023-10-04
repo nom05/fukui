@@ -1,6 +1,6 @@
 ! ** modules/computation.f90 >> Main computation module of fukui program
 !
-!  Copyright (c) 2022  Nicolás Otero Martínez - Marcos Mandado Alonso - Ricardo A. Mosquera Castro
+!  Copyright (c) 2023  Nicolás Otero Martínez - Marcos Mandado Alonso - Ricardo A. Mosquera Castro
 !  This file is part of the fukui program available in:
 !      https://github.com/nom05/fukui
 !
@@ -24,6 +24,7 @@ module computation
   integer(kind = i4)                          :: icalcat
   real   (kind = dp),allocatable,dimension(:) :: poom,om,s
   real   (kind = dp)                          :: popul,rhon
+  real   (kind = dp)            ,dimension(3) :: dmi
 
   contains
 
@@ -60,16 +61,15 @@ module computation
   
   end subroutine orde_ic
 
-  subroutine skip_gaussians(iato)
+  subroutine skip_gaussians
 
-    use :: main           ,   only: ctffd,print_rdarr,dbl2str,ifuk
+    use :: main           ,   only: ctffd,print_rdarr,dbl2str,ifuk,iato
     use :: wfn            ,   only: nato,nuclei,nprim
 
     implicit none
 
     real   (kind = dp),allocatable,dimension(:) :: dist
     real   (kind = dp)                          :: vec(3)
-    integer(kind = i4),intent(in)               :: iato
     integer(kind = i4)                          :: i,iskprim
 
     allocate(   dist(nato))                                           !! R1
@@ -111,7 +111,70 @@ module computation
 
   end subroutine skip_gaussians
 
-  subroutine maincalc(ipart)
+  subroutine Dens(ipart)
+
+    use :: wfn ,                              only: nom,nprim,primitives,nuclei,c,pel,matom &
+                                                  , deallocate_wfn
+    use :: grid,                              only: nptos,points
+
+    implicit none
+
+    real   (kind = dp)                          :: rrr,vec(3)
+    integer(kind = i4)                          :: ipart
+    integer(kind = i4)                          :: i,j,k,l,iom,jom,ifrag,id
+    real   (kind = dp),allocatable,dimension(:) :: ggg
+
+    allocate(poom(nom),ggg(nprim),om(nom))
+    popul = 0._dp
+!$omp parallel default(none) &
+!$omp&          shared(poom)
+!$omp workshare
+    poom  = 0._dp
+!$omp end workshare
+!$omp end parallel
+
+!$omp parallel default(none) &
+!$omp&         private(ifrag,i,j,vec,rrr,k,ggg,om,rhon,l,iom,jom, id ) &
+!$omp&          shared(ipart,nptos,icalcat,points,nuclei,inddist,icmi  &
+!$omp&                ,icma,nprim,primitives,nom,c,matom,pel         ) &
+!$omp&         reduction(+:popul,poom)
+!$omp do schedule(dynamic)
+    do ifrag = 1,ipart
+       call prwkdone(ifrag,nptos,ipart)
+       do i=(ifrag-1)*nptos/ipart+1,ifrag*nptos/ipart
+          do j=1,icalcat
+             vec(1) = points(i)%x-nuclei(inddist(j))%x
+             vec(2) = points(i)%y-nuclei(inddist(j))%y
+             vec(3) = points(i)%z-nuclei(inddist(j))%z
+             rrr    = dot_product(vec,vec)
+             do k=icmi(inddist(j)),icma(inddist(j))
+                call gaussi(vec(1),vec(2),vec(3),rrr,k,ggg(k))
+             enddo !! k=icmi(inddist(j)),icma(inddist(j))
+          enddo !! j=1,icalcat
+          om   = 0._dp
+          rhon = 0._dp
+          do j=1,nom
+             do l=1,icalcat
+                do k=icmi(inddist(l)),icma(inddist(l))
+                   om(j)=om(j)+c(matom(j),k)*ggg(k)
+                enddo !! k=icmi(inddist(l)),icma(inddist(l))
+             enddo !! l=1,icalcat
+             rhon    = rhon   + om(j)*om(j)*pel(matom(j))
+             poom(j) = poom(j)+ om(j)*om(j)*points(i)%w
+          enddo !! j=1,nom
+          popul = popul+rhon*points(i)%w
+
+       enddo !! i=(ifrag-1)*nptos/10+1,ifrag*nptos/10
+    enddo !! ifrag = 1,ipart
+!$omp enddo
+!$omp end parallel
+
+    deallocate(ggg,icma,icmi,inddist,points)
+    call deallocate_wfn
+
+  end subroutine Dens
+
+  subroutine DensAom(ipart)
 
     use :: wfn ,                              only: nom,ialfa,nprim,primitives,nuclei,uhf,c,pel,matom,nbac &
                                                   , deallocate_wfn
@@ -143,6 +206,7 @@ module computation
 !$omp&         reduction(+:popul,poom,s)
 !$omp do schedule(dynamic)
        do ifrag = 1,ipart
+          call prwkdone(ifrag,nptos,ipart)
           do i=(ifrag-1)*nptos/ipart+1,ifrag*nptos/ipart
              do j=1,icalcat
                 vec(1) = points(i)%x-nuclei(inddist(j))%x
@@ -183,7 +247,6 @@ module computation
              enddo !! iom=ialfa+1,nom
 
           enddo !! i=(ifrag-1)*nptos/10+1,ifrag*nptos/10
-          call prwkdone(ifrag,nptos,ipart)
        enddo !! ifrag = 1,ipart
 !$omp enddo
 !$omp end parallel
@@ -197,6 +260,7 @@ module computation
 !$omp&         reduction(+:popul,poom,s)
 !$omp do schedule(dynamic)
        do ifrag = 1,ipart
+          call prwkdone(ifrag,nptos,ipart)
           do i=(ifrag-1)*nptos/ipart+1,ifrag*nptos/ipart
              do j=1,icalcat
                 vec(1) = points(i)%x-nuclei(inddist(j))%x
@@ -229,7 +293,6 @@ module computation
              enddo !! iom=1,nom
 
           enddo !! i=(ifrag-1)*nptos/10+1,ifrag*nptos/10
-          call prwkdone(ifrag,nptos,ipart)
        enddo !! ifrag = 1,ipart
 
 !$omp enddo
@@ -239,12 +302,93 @@ module computation
       deallocate(ggg,icma,icmi,inddist,points)
       call deallocate_wfn
 
-  end subroutine maincalc
+  end subroutine DensAom
 
+  subroutine DensDipMom(ipart)
 
-  subroutine maindens(ipart)
+    use :: main,                              only: iato,coord !! if iato=0 (default when not specified, no intr+CT partitioning)
+    use :: wfn ,                              only: nom,nprim,primitives,nuclei,c,pel,matom &
+                                                  , deallocate_wfn
+    use :: grid,                              only: nptos,points
 
-    use :: wfn ,                              only: nom,ialfa,nprim,primitives,nuclei,uhf,c,pel,matom &
+    implicit none
+
+    real   (kind = dp)                           :: rrr,vec(3)
+    integer(kind = i4)                           :: ipart
+    integer(kind = i4)                           :: i,j,k,l,iom,jom,ifrag,id
+    real   (kind = dp),allocatable,dimension(:)  :: ggg
+
+    allocate(poom(nom),ggg(nprim),om(nom))
+    popul = 0._dp
+    dmi   = 0._dp
+    if (.NOT.allocated(coord)) then
+      allocate(coord(3))
+      coord = 0._dp
+      if (iato.NE.0) then
+         coord(1) = nuclei(iato)%x
+         coord(2) = nuclei(iato)%y
+         coord(3) = nuclei(iato)%z
+      endif !! (iato.NE.0) then
+    endif !! (.NOT.allocated(coord)) then
+!$omp parallel default(none) &
+!$omp&          shared(poom)
+!$omp workshare
+    poom  = 0._dp
+!$omp end workshare
+!$omp end parallel
+
+!$omp parallel default(none) &
+!$omp&         private(ifrag,i,j,vec,rrr,k,ggg,om,rhon,l,iom,jom, id ) &
+!$omp&          shared(ipart,nptos,icalcat,points,nuclei,inddist,icmi  &
+!$omp&                ,icma,nprim,primitives,nom,c,matom,pel,coord   ) &
+!$omp&         reduction(+:popul,poom,dmi)
+!$omp do schedule(dynamic)
+    do ifrag = 1,ipart
+       call prwkdone(ifrag,nptos,ipart)
+       do i=(ifrag-1)*nptos/ipart+1,ifrag*nptos/ipart
+          do j = 1,icalcat
+             vec(1) = points(i)%x-nuclei(inddist(j))%x
+             vec(2) = points(i)%y-nuclei(inddist(j))%y
+             vec(3) = points(i)%z-nuclei(inddist(j))%z
+             rrr    = dot_product(vec,vec)
+             do k = icmi(inddist(j)),icma(inddist(j))
+                call gaussi(vec(1),vec(2),vec(3),rrr,k,ggg(k))
+             enddo !! k=icmi(inddist(j)),icma(inddist(j))
+          enddo !! j=1,icalcat
+          om   = 0._dp
+          rhon = 0._dp
+          do j = 1,nom
+             do l = 1,icalcat
+                do k=icmi(inddist(l)),icma(inddist(l))
+                   om(j)=om(j)+c(matom(j),k)*ggg(k)
+                enddo !! k=icmi(inddist(l)),icma(inddist(l))
+             enddo !! l=1,icalcat
+             rhon    = rhon   + om(j)*om(j)*pel(matom(j))
+             poom(j) = poom(j)+ om(j)*om(j)*points(i)%w
+          enddo !! j=1,nom
+
+!  >> Atomic population:
+          popul = popul+rhon*points(i)%w
+
+!  >> Atomic intrinsic dipole moment components:
+          dmi(1) = dmi(1) - (points(i)%x-coord(1)) * points(i)%w * rhon
+          dmi(2) = dmi(2) - (points(i)%y-coord(2)) * points(i)%w * rhon
+          dmi(3) = dmi(3) - (points(i)%z-coord(3)) * points(i)%w * rhon
+
+       enddo !! i=(ifrag-1)*nptos/10+1,ifrag*nptos/10
+    enddo !! ifrag = 1,ipart
+!$omp enddo
+!$omp end parallel
+
+    deallocate(ggg,icma,icmi,inddist,points)
+    call deallocate_wfn
+
+  end subroutine DensDipmom
+
+  subroutine  DensDipMomAom(ipart)
+
+    use :: main,                              only: coord,iato !! if iato=0 (default when not specified, no intr+CT partitioning)
+    use :: wfn ,                              only: nom,ialfa,nprim,primitives,nuclei,uhf,c,pel,matom,nbac &
                                                   , deallocate_wfn
     use :: grid,                              only: nptos,points
 
@@ -255,12 +399,23 @@ module computation
     integer(kind = i4)                          :: i,j,k,l,iom,jom,ifrag,id
     real   (kind = dp),allocatable,dimension(:) :: ggg
 
-    allocate(poom(nom),ggg(nprim),om(nom))
+    allocate(s(nbac*(nbac+1)/2),poom(nom),ggg(nprim),om(nom))
     popul = 0._dp
+    dmi   = 0._dp
+    if (.NOT.allocated(coord)) then
+      allocate(coord(3))
+      coord = 0._dp
+      if (iato.NE.0) then
+         coord(1) = nuclei(iato)%x
+         coord(2) = nuclei(iato)%y
+         coord(3) = nuclei(iato)%z
+      endif !! (iato.NE.0) then
+    endif !! (.NOT.allocated(coord)) then
 !$omp parallel default(none) &
-!$omp&          shared(poom)
+!$omp&          shared(poom,s)
 !$omp workshare
     poom  = 0._dp
+    s     = 0._dp
 !$omp end workshare
 !$omp end parallel
 
@@ -269,8 +424,9 @@ module computation
 !$omp parallel default(none) &
 !$omp&         private(ifrag,i,j,vec,rrr,k,ggg,om,rhon,l,iom,jom, id ) &
 !$omp&          shared(ipart,nptos,icalcat,points,nuclei,inddist,icmi  &
-!$omp&                ,icma,nprim,primitives,nom,c,matom,pel,ialfa   ) &
-!$omp&         reduction(+:popul,poom)
+!$omp&                ,icma,nprim,primitives,nom,c,matom,pel,ialfa     &
+!$omp&                ,coord                                         ) &
+!$omp&         reduction(+:popul,poom,s,dmi)
 !$omp do schedule(dynamic)
        do ifrag = 1,ipart
           call prwkdone(ifrag,nptos,ipart)
@@ -295,10 +451,32 @@ module computation
                 rhon    = rhon   + om(j)*om(j)*pel(matom(j))
                 poom(j) = poom(j)+ om(j)*om(j)*points(i)%w
              enddo !! j=1,nom
+
+!  >> Atomic population:
              popul = popul+rhon*points(i)%w
 
+!  >> Atomic intrinsic dipole moment components:
+          dmi(1) = dmi(1) - (points(i)%x-coord(1)) * points(i)%w * rhon
+          dmi(2) = dmi(2) - (points(i)%y-coord(2)) * points(i)%w * rhon
+          dmi(3) = dmi(3) - (points(i)%z-coord(3)) * points(i)%w * rhon
+
+!  >> Unrestricted Atomic Overlap Matrix
+             do iom=1,ialfa
+                do jom=1,iom
+                   k = matom(jom) + matom(iom)*(matom(iom)-1)/2
+! omp atomic update
+                   s(k) = s(k) + om(iom) * om(jom) * points(i)%w
+                enddo !! jom=1,iom
+             enddo !! iom=1,ialfa
+             do iom=ialfa+1,nom
+                do jom=ialfa+1,iom
+                   k = matom(jom) + matom(iom)*(matom(iom)-1)/2
+! omp atomic update
+                   s(k) = s(k) + om(iom) * om(jom) * points(i)%w
+                enddo !! jom=ialfa+1,iom
+             enddo !! iom=ialfa+1,nom
+
           enddo !! i=(ifrag-1)*nptos/10+1,ifrag*nptos/10
-          call prwkdone(ifrag,nptos,ipart)
        enddo !! ifrag = 1,ipart
 !$omp enddo
 !$omp end parallel
@@ -308,10 +486,11 @@ module computation
 !$omp parallel default(none) &
 !$omp&         private(ifrag,i,j,vec,rrr,k,ggg,om,rhon,l,iom,jom, id ) &
 !$omp&          shared(ipart,nptos,icalcat,points,nuclei,inddist,icmi  &
-!$omp&                ,icma,nprim,primitives,nom,c,matom,pel         ) &
-!$omp&         reduction(+:popul,poom)
+!$omp&                ,icma,nprim,primitives,nom,c,matom,pel,coord   ) &
+!$omp&         reduction(+:popul,poom,s,dmi)
 !$omp do schedule(dynamic)
        do ifrag = 1,ipart
+          call prwkdone(ifrag,nptos,ipart)
           do i=(ifrag-1)*nptos/ipart+1,ifrag*nptos/ipart
              do j=1,icalcat
                 vec(1) = points(i)%x-nuclei(inddist(j))%x
@@ -333,9 +512,24 @@ module computation
                 rhon    = rhon   + om(j)*om(j)*pel(matom(j))
                 poom(j) = poom(j)+ om(j)*om(j)*points(i)%w
              enddo !! j=1,nom
+
+!  >> Atomic population:
              popul = popul+rhon*points(i)%w
+
+!  >> Atomic intrinsic dipole moment components:
+          dmi(1) = dmi(1) - (points(i)%x-coord(1)) * points(i)%w * rhon
+          dmi(2) = dmi(2) - (points(i)%y-coord(2)) * points(i)%w * rhon
+          dmi(3) = dmi(3) - (points(i)%z-coord(3)) * points(i)%w * rhon
+
+!  >> Restricted Atomic Overlap Matrix
+             do iom=1,nom
+                do jom=1,iom
+                   k = matom(jom) + matom(iom)*(matom(iom)-1)/2
+                   s(k) = s(k) + om(iom) * om(jom) * points(i)%w
+                enddo !! jom=1,iom
+             enddo !! iom=1,nom
+
           enddo !! i=(ifrag-1)*nptos/10+1,ifrag*nptos/10
-          call prwkdone(ifrag,nptos,ipart)
        enddo !! ifrag = 1,ipart
 
 !$omp enddo
@@ -345,7 +539,7 @@ module computation
       deallocate(ggg,icma,icmi,inddist,points)
       call deallocate_wfn
 
-  end subroutine maindens
+  end subroutine  DensDipMomAom
 
   subroutine prwkdone(nfrag,ntot,ipart)
 
@@ -354,14 +548,14 @@ module computation
       implicit none
       integer(kind = i4),intent(in) :: nfrag,ntot,ipart
 
-      call print_second("CPU "                     &
+      call print_second("CPU "                       &
                 // int2str(omp_get_thread_num())   &
                 // ": from "                       &
                 // int2str((nfrag-1)*ntot/ipart+1) &
                 // " to "                          &
                 // int2str(nfrag*ntot/ipart)       &
                 // " of "                          &
-                // int2str(ntot) &
+                // int2str(ntot)                   &
                        )
 
   end subroutine prwkdone
