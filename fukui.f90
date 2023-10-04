@@ -100,6 +100,10 @@ program fukui
     end subroutine goon
     subroutine init_par
     end subroutine init_par
+    subroutine onlygrid(ii)
+      use :: main,only: i4
+      integer(kind = i4) :: ii,j
+    end subroutine init_par
   end interface
 
 ! ... # arguments
