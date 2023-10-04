@@ -103,7 +103,7 @@ program fukui
     subroutine onlygrid(ii)
       use :: main,only: i4
       integer(kind = i4) :: ii,j
-    end subroutine init_par
+    end subroutine onlygrid
   end interface
 
 ! ... # arguments
